@@ -9,6 +9,7 @@ const ANIMATION_TIME = 250;
 export default class SnapAnimator {
   private window: Meta.Window;
   private animationToken = 0;
+  private frozenActor: Meta.WindowActor | null = null;
 
   constructor(window: Meta.Window) {
     this.window = window;
@@ -30,11 +31,15 @@ export default class SnapAnimator {
     });
   }
 
-  animate(sourceRect: Mtk.Rectangle, targetRect: Mtk.Rectangle) {
+  animate(sourceRect: Mtk.Rectangle, targetRect: Mtk.Rectangle, onComplete?: () => void) {
     const actor = this.window.get_compositor_private<Meta.WindowActor>();
     const token = ++this.animationToken;
 
+    this.resetActor(actor);
+
     if (!this.canAnimate(actor, sourceRect, targetRect)) {
+      this.thaw();
+      onComplete?.();
       return;
     }
 
@@ -42,12 +47,13 @@ export default class SnapAnimator {
 
     if (duration <= 0) {
       this.resetActor(actor);
+      this.thaw();
+      onComplete?.();
       return;
     }
 
-    if (this.isIdentity(actor)) {
-      this.setInvertedTransform(actor, sourceRect, targetRect);
-    }
+    this.setInvertedTransform(actor, sourceRect, targetRect);
+    this.thaw();
 
     const animationParams = {
       duration,
@@ -62,31 +68,40 @@ export default class SnapAnimator {
       onStopped: () => {
         if (token === this.animationToken) {
           this.resetActor(actor);
+          onComplete?.();
         }
       }
     });
   }
 
-  prepare(sourceRect: Mtk.Rectangle, targetRect: Mtk.Rectangle) {
+  freeze() {
     const actor = this.window.get_compositor_private<Meta.WindowActor>();
 
-    this.resetActor(actor);
-
-    if (!this.canAnimate(actor, sourceRect, targetRect) ||
-        AnimationUtils.adjustAnimationTime(ANIMATION_TIME) <= 0) {
+    if (!actor || this.frozenActor) {
       return;
     }
 
-    this.setInvertedTransform(actor, sourceRect, targetRect);
+    actor.freeze();
+    this.frozenActor = actor;
   }
 
   cancel() {
     this.animationToken++;
     this.resetActor(this.window.get_compositor_private<Meta.WindowActor>());
+    this.thaw();
   }
 
   destroy() {
     this.cancel();
+  }
+
+  private thaw() {
+    if (!this.frozenActor) {
+      return;
+    }
+
+    this.frozenActor.thaw();
+    this.frozenActor = null;
   }
 
   private resetActor(actor: Meta.WindowActor | null) {
@@ -115,13 +130,6 @@ export default class SnapAnimator {
       sourceRect.height > 0 &&
       targetRect.width > 0 &&
       targetRect.height > 0;
-  }
-
-  private isIdentity(actor: Meta.WindowActor) {
-    return actor.translation_x === 0 &&
-      actor.translation_y === 0 &&
-      actor.scale_x === 1 &&
-      actor.scale_y === 1;
   }
 
   private setInvertedTransform(

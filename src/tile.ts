@@ -1,4 +1,5 @@
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Mtk from 'gi://Mtk';
@@ -7,6 +8,7 @@ import SnapAnimator from './snapAnimator.js';
 
 const GEOMETRY_QUIET_TIME = 24;
 const GEOMETRY_HARD_TIMEOUT = 220;
+const MAXIMIZE_STATE_HARD_TIMEOUT = 500;
 const RECT_TOLERANCE = 8;
 
 type WaitState = {
@@ -14,6 +16,18 @@ type WaitState = {
   signalIds: number[];
   quietTimeoutId: number;
   hardTimeoutId: number;
+};
+
+type MaximizeWaitState = {
+  token: number;
+  signalIds: number[];
+  hardTimeoutId: number;
+};
+
+type DebugTrace = {
+  label: string;
+  startTime: number;
+  lastTime: number;
 };
 
 export type WindowSnapshot = {
@@ -27,17 +41,20 @@ export type WindowSnapshot = {
 export default class Tile {
   private window: Meta.Window;
   private screen: Mtk.Rectangle = new Mtk.Rectangle();
-  private gapSize = 0;
   private position = Position.CENTER;
   private lastSettledRect: Mtk.Rectangle | null = null;
   private restoreRect: Mtk.Rectangle | null = null;
   private signals: Set<number> = new Set();
   private waitState: WaitState | null = null;
+  private maximizeWaitState: MaximizeWaitState | null = null;
   private operationToken = 0;
   private animator: SnapAnimator;
+  private settings: Gio.Settings;
+  private debugTrace: DebugTrace | null = null;
 
-  constructor(window: Meta.Window) {
+  constructor(window: Meta.Window, settings: Gio.Settings) {
     this.window = window;
+    this.settings = settings;
     this.animator = new SnapAnimator(window);
     this.lastSettledRect = this.copyRect(window.get_frame_rect());
   }
@@ -84,6 +101,8 @@ export default class Tile {
     const sourceRect = this.animator.captureVisualRect();
     const previousPosition = this.getPosition();
     const token = this.beginOperation();
+    this.startDebugTrace(`move:${previousPosition}->${position}`);
+    this.debugLog(`source=${this.formatRect(sourceRect)} target=${this.formatRect(targetRect)}`);
 
     if (previousPosition === Position.CENTER) {
       this.restoreRect = this.copyRect(this.window.get_frame_rect());
@@ -92,35 +111,14 @@ export default class Tile {
     this.position = position;
     this.animator.cancel();
 
-    const resize = () => {
-      if (token !== this.operationToken) {
-        return;
-      }
-
-      this.waitForGeometry(token, () => {
-        this.finishResize(token, position, sourceRect, false);
-      });
-
-      this.animator.prepare(sourceRect, targetRect);
-      this.window.move_resize_frame(
-        true,
-        targetRect.x,
-        targetRect.y,
-        targetRect.width,
-        targetRect.height
-      );
-    };
-
     if (this.window.get_maximize_flags() > 0) {
-      this.window.unmaximize();
-      GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-        resize();
-        return GLib.SOURCE_REMOVE;
-      });
+      this.debugLog('route=maximized');
+      this.moveFromMaximized(token, position, sourceRect, targetRect);
       return true;
     }
 
-    resize();
+    this.debugLog('route=normal');
+    this.moveNormal(token, position, sourceRect, targetRect);
     return true;
   }
 
@@ -129,7 +127,8 @@ export default class Tile {
       return false;
     }
 
-    this.beginOperation();
+    const token = this.beginOperation();
+    this.startDebugTrace(`maximize:${this.position}`);
     this.animator.cancel();
 
     if (this.position === Position.CENTER) {
@@ -138,22 +137,30 @@ export default class Tile {
 
     this.position = Position.MAXIMIZED;
     this.lastSettledRect = null;
+    this.waitForGeometry(token, () => {
+      this.debugLog(`native maximize geometry settled rect=${this.formatRect(this.window.get_frame_rect())}`);
+      this.finishDebugTrace();
+    });
+    this.debugLog('native maximize request');
     this.window.maximize();
     return true;
   }
 
   restore() {
-    this.beginOperation();
+    const token = this.beginOperation();
+    this.startDebugTrace('restore:maximized->center');
     this.animator.cancel();
     this.position = Position.CENTER;
-    const token = this.operationToken;
 
     this.waitForGeometry(token, () => {
       const rect = this.window.get_frame_rect();
       this.lastSettledRect = this.copyRect(rect);
       this.restoreRect = this.copyRect(rect);
+      this.debugLog(`native restore geometry settled rect=${this.formatRect(rect)}`);
+      this.finishDebugTrace();
     });
 
+    this.debugLog('native restore request');
     this.window.unmaximize();
     return true;
   }
@@ -174,6 +181,8 @@ export default class Tile {
     const targetRect = this.copyRect(this.restoreRect);
     const sourceRect = this.animator.captureVisualRect();
     const token = this.beginOperation();
+    this.startDebugTrace('restore-normal');
+    this.debugLog(`source=${this.formatRect(sourceRect)} target=${this.formatRect(targetRect)}`);
 
     this.animator.cancel();
     this.position = Position.CENTER;
@@ -183,14 +192,19 @@ export default class Tile {
         return;
       }
 
-      this.animator.prepare(sourceRect, targetRect);
       this.waitForGeometry(token, () => {
         const settledRect = this.window.get_frame_rect();
         this.position = Position.CENTER;
         this.lastSettledRect = this.copyRect(settledRect);
         this.restoreRect = this.copyRect(settledRect);
-        this.animator.animate(sourceRect, settledRect);
+        this.debugLog(`animate start final=${this.formatRect(settledRect)}`);
+        this.animator.animate(sourceRect, settledRect, () => {
+          this.debugLog('animation complete');
+          this.finishDebugTrace();
+        });
       });
+      this.animator.freeze();
+      this.debugLog(`restore-normal resize request target=${this.formatRect(targetRect)}`);
       this.window.move_resize_frame(
         true,
         targetRect.x,
@@ -201,11 +215,23 @@ export default class Tile {
     };
 
     if (this.window.get_maximize_flags() > 0) {
+      this.waitForFullyUnmaximized(
+        token,
+        restoreGeometry,
+        () => {
+          if (token !== this.operationToken) {
+            return;
+          }
+
+          const rect = this.window.get_frame_rect();
+          this.position = this.detectPosition(rect);
+          this.lastSettledRect = this.copyRect(rect);
+          this.animator.cancel();
+        }
+      );
+      this.animator.freeze();
+      this.debugLog('restore-normal unmaximize request');
       this.window.unmaximize();
-      GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-        restoreGeometry();
-        return GLib.SOURCE_REMOVE;
-      });
       return true;
     }
 
@@ -219,23 +245,25 @@ export default class Tile {
     }
 
     this.beginOperation();
+    this.startDebugTrace(`minimize:${this.position}`);
     this.animator.cancel();
     this.position = Position.CENTER;
     this.lastSettledRect = null;
+    this.debugLog('native minimize request');
     this.window.minimize();
+    this.finishDebugTrace();
     return true;
   }
 
-  reloadScreen(gapSize: number) {
+  reloadScreen() {
     const monitorIndex = this.window.get_monitor();
     const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
 
-    this.gapSize = Math.max(0, gapSize);
     this.screen = new Mtk.Rectangle({
-      x: workArea.x + this.gapSize,
-      y: workArea.y + this.gapSize,
-      width: Math.max(1, workArea.width - this.gapSize * 2),
-      height: Math.max(1, workArea.height - this.gapSize * 2)
+      x: workArea.x,
+      y: workArea.y,
+      width: Math.max(1, workArea.width),
+      height: Math.max(1, workArea.height)
     });
 
     if (this.position === Position.CENTER && !this.waitState) {
@@ -252,6 +280,7 @@ export default class Tile {
   destroy() {
     this.operationToken++;
     this.clearWaitState();
+    this.clearMaximizeWaitState();
     this.animator.destroy();
 
     for (const signalId of this.signals) {
@@ -273,25 +302,32 @@ export default class Tile {
 
   applySnapshot(snapshot: WindowSnapshot) {
     const token = this.beginOperation();
+    this.startDebugTrace(`undo:${this.position}->${snapshot.position}`);
     this.animator.cancel();
     this.position = snapshot.position;
 
     if (this.window.minimized) {
+      this.debugLog('undo unminimize current window');
       this.window.unminimize();
     }
 
     if (snapshot.minimized) {
+      this.debugLog('undo minimize request');
       this.window.minimize();
       this.lastSettledRect = null;
+      this.finishDebugTrace();
       return;
     }
 
+    this.debugLog('undo activate window');
     this.window.activate(global.get_current_time());
 
     if (snapshot.maximized) {
+      this.debugLog('undo maximize request');
       this.window.maximize();
       this.position = Position.MAXIMIZED;
       this.lastSettledRect = null;
+      this.finishDebugTrace();
       return;
     }
 
@@ -301,12 +337,19 @@ export default class Tile {
       }
 
       const sourceRect = this.animator.captureVisualRect();
-      this.animator.prepare(sourceRect, snapshot.rect);
       this.waitForGeometry(token, () => {
         this.clearWaitState();
         this.lastSettledRect = this.copyRect(this.window.get_frame_rect());
-        this.animator.animate(sourceRect, this.window.get_frame_rect());
+        const settledRect = this.window.get_frame_rect();
+        this.debugLog(`undo geometry settled final=${this.formatRect(settledRect)}`);
+        this.debugLog('animate start');
+        this.animator.animate(sourceRect, settledRect, () => {
+          this.debugLog('animation complete');
+          this.finishDebugTrace();
+        });
       });
+      this.animator.freeze();
+      this.debugLog(`undo resize request target=${this.formatRect(snapshot.rect)}`);
       this.window.move_resize_frame(
         true,
         snapshot.rect.x,
@@ -317,7 +360,22 @@ export default class Tile {
     };
 
     if (this.window.get_maximize_flags() > 0) {
-      this.waitForGeometry(token, restoreGeometry);
+      this.waitForFullyUnmaximized(
+        token,
+        restoreGeometry,
+        () => {
+          if (token !== this.operationToken) {
+            return;
+          }
+
+          const rect = this.window.get_frame_rect();
+          this.position = this.detectPosition(rect);
+          this.lastSettledRect = this.copyRect(rect);
+          this.animator.cancel();
+        }
+      );
+      this.animator.freeze();
+      this.debugLog('undo unmaximize request');
       this.window.unmaximize();
       return;
     }
@@ -328,6 +386,7 @@ export default class Tile {
   private beginOperation() {
     this.operationToken++;
     this.clearWaitState();
+    this.clearMaximizeWaitState();
     return this.operationToken;
   }
 
@@ -340,24 +399,134 @@ export default class Tile {
       (this.window.allows_resize() || maximized);
   }
 
+  private moveFromMaximized(
+    token: number,
+    position: Position,
+    sourceRect: Mtk.Rectangle,
+    targetRect: Mtk.Rectangle
+  ) {
+    if (position === Position.LEFT || position === Position.RIGHT) {
+      const flags = this.window.get_maximize_flags();
+      const horizontallyMaximized = (flags & Meta.MaximizeFlags.HORIZONTAL) !== 0;
+
+      if (horizontallyMaximized) {
+        this.debugLog(
+          `experimental horizontal unmaximize before flags=${flags} ` +
+          `h=${this.window.maximized_horizontally} v=${this.window.maximized_vertically}`
+        );
+        this.window.set_unmaximize_flags(Meta.MaximizeFlags.HORIZONTAL);
+        this.debugLog(
+          `experimental horizontal unmaximize after flags=${this.window.get_maximize_flags()} ` +
+          `h=${this.window.maximized_horizontally} v=${this.window.maximized_vertically}`
+        );
+        this.moveNormal(token, position, sourceRect, targetRect);
+        return;
+      }
+    }
+
+    this.waitForFullyUnmaximized(
+      token,
+      () => {
+        if (token !== this.operationToken) {
+          return;
+        }
+
+        this.normalizeToRect(token, sourceRect, () => {
+          if (token !== this.operationToken) {
+            return;
+          }
+
+          this.debugLog('normalize settled');
+          this.moveNormal(token, position, sourceRect, targetRect);
+        });
+      },
+      () => {
+        if (token !== this.operationToken) {
+          return;
+        }
+
+        const rect = this.window.get_frame_rect();
+        this.position = this.detectPosition(rect);
+        this.lastSettledRect = this.copyRect(rect);
+        this.animator.cancel();
+      }
+    );
+
+    this.animator.freeze();
+    this.debugLog('unmaximize request');
+    this.window.unmaximize();
+  }
+
+  private moveNormal(
+    token: number,
+    position: Position,
+    sourceRect: Mtk.Rectangle,
+    targetRect: Mtk.Rectangle,
+    skipAnimation = false
+  ) {
+    if (token !== this.operationToken) {
+      return;
+    }
+
+    this.waitForGeometry(token, () => {
+      this.debugLog('snap geometry settled');
+      this.finishResize(token, position, sourceRect, false, skipAnimation);
+    });
+
+    this.animator.freeze();
+    this.debugLog(`snap resize request target=${this.formatRect(targetRect)}`);
+    this.window.move_resize_frame(
+      true,
+      targetRect.x,
+      targetRect.y,
+      targetRect.width,
+      targetRect.height
+    );
+  }
+
+  private normalizeToRect(token: number, rect: Mtk.Rectangle, callback: () => void) {
+    if (token !== this.operationToken) {
+      return;
+    }
+
+    this.waitForGeometry(token, callback);
+    this.debugLog(`normalize request rect=${this.formatRect(rect)}`);
+    this.window.move_resize_frame(
+      true,
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height
+    );
+  }
+
   private finishResize(
     token: number,
     position: Position,
     sourceRect: Mtk.Rectangle,
-    corrected: boolean
+    corrected: boolean,
+    skipAnimation = false
   ) {
     if (token !== this.operationToken) {
       return;
     }
 
     const actualRect = this.window.get_frame_rect();
+    this.debugLog(
+      `actual rect=${this.formatRect(actualRect)} flags=${this.window.get_maximize_flags()} ` +
+      `h=${this.window.maximized_horizontally} v=${this.window.maximized_vertically}`
+    );
     const correctedPosition = this.getAnchoredPosition(position, actualRect);
 
     if (!corrected &&
         (correctedPosition.x !== actualRect.x || correctedPosition.y !== actualRect.y)) {
       this.waitForGeometry(token, () => {
-        this.finishResize(token, position, sourceRect, true);
+        this.debugLog('anchor correction settled');
+        this.finishResize(token, position, sourceRect, true, skipAnimation);
       });
+      this.debugLog(
+        `anchor correction request x=${correctedPosition.x} y=${correctedPosition.y}`
+      );
       this.window.move_frame(true, correctedPosition.x, correctedPosition.y);
       return;
     }
@@ -366,7 +535,18 @@ export default class Tile {
     const settledRect = this.window.get_frame_rect();
     this.position = position;
     this.lastSettledRect = this.copyRect(settledRect);
-    this.animator.animate(sourceRect, settledRect);
+    if (skipAnimation) {
+      this.debugLog(`skip custom animation final=${this.formatRect(settledRect)}`);
+      this.animator.cancel();
+      this.finishDebugTrace();
+      return;
+    }
+
+    this.debugLog(`animate start final=${this.formatRect(settledRect)}`);
+    this.animator.animate(sourceRect, settledRect, () => {
+      this.debugLog('animation complete');
+      this.finishDebugTrace();
+    });
   }
 
   private waitForGeometry(token: number, callback: () => void) {
@@ -385,6 +565,7 @@ export default class Tile {
       }
 
       this.clearWaitState();
+      this.debugLog('waitForGeometry finish');
       callback();
       return GLib.SOURCE_REMOVE;
     };
@@ -410,16 +591,81 @@ export default class Tile {
 
     state.signalIds.push(this.window.connect('size-changed', queueQuietFinish));
     state.signalIds.push(this.window.connect('position-changed', queueQuietFinish));
+    this.debugLog('waitForGeometry start');
     state.hardTimeoutId = GLib.timeout_add(
       GLib.PRIORITY_DEFAULT,
       GEOMETRY_HARD_TIMEOUT,
       () => {
         state.hardTimeoutId = 0;
+        this.debugLog('waitForGeometry hard timeout');
         return finish();
       }
     );
 
     this.waitState = state;
+  }
+
+  private waitForFullyUnmaximized(
+    token: number,
+    onReady: () => void,
+    onAbort: () => void
+  ) {
+    this.clearMaximizeWaitState();
+
+    const state: MaximizeWaitState = {
+      token,
+      signalIds: [],
+      hardTimeoutId: 0
+    };
+
+    const finishIfReady = () => {
+      if (this.maximizeWaitState !== state || token !== this.operationToken) {
+        return;
+      }
+
+      if (this.window.get_maximize_flags() !== 0) {
+        return;
+      }
+
+      this.debugLog('unmaximize flags clear');
+      this.clearMaximizeWaitState();
+      onReady();
+    };
+
+    state.signalIds.push(
+      this.window.connect('notify::maximized-horizontally', finishIfReady)
+    );
+    state.signalIds.push(
+      this.window.connect('notify::maximized-vertically', finishIfReady)
+    );
+
+    state.hardTimeoutId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      MAXIMIZE_STATE_HARD_TIMEOUT,
+      () => {
+        state.hardTimeoutId = 0;
+
+        if (this.maximizeWaitState !== state || token !== this.operationToken) {
+          return GLib.SOURCE_REMOVE;
+        }
+
+        if (this.window.get_maximize_flags() === 0) {
+          this.clearMaximizeWaitState();
+          onReady();
+          return GLib.SOURCE_REMOVE;
+        }
+
+        this.debugLog('waitForUnmaximized hard timeout');
+        console.warn('Sane Tiling: timed out waiting for maximization state to clear');
+        this.clearMaximizeWaitState();
+        onAbort();
+        return GLib.SOURCE_REMOVE;
+      }
+    );
+
+    this.maximizeWaitState = state;
+    this.debugLog(`waitForUnmaximized start flags=${this.window.get_maximize_flags()}`);
+    finishIfReady();
   }
 
   private clearWaitState() {
@@ -443,14 +689,30 @@ export default class Tile {
     }
   }
 
+  private clearMaximizeWaitState() {
+    const state = this.maximizeWaitState;
+    if (!state) {
+      return;
+    }
+
+    this.maximizeWaitState = null;
+
+    for (const signalId of state.signalIds) {
+      this.window.disconnect(signalId);
+    }
+
+    if (state.hardTimeoutId) {
+      GLib.source_remove(state.hardTimeoutId);
+    }
+  }
+
   private getTargetRect(position: Position) {
-    const innerGap = this.gapSize;
-    const leftWidth = Math.max(1, Math.floor((this.screen.width - innerGap) / 2));
-    const rightWidth = Math.max(1, this.screen.width - innerGap - leftWidth);
-    const topHeight = Math.max(1, Math.floor((this.screen.height - innerGap) / 2));
-    const bottomHeight = Math.max(1, this.screen.height - innerGap - topHeight);
-    const rightX = this.screen.x + leftWidth + innerGap;
-    const bottomY = this.screen.y + topHeight + innerGap;
+    const leftWidth = Math.max(1, Math.floor(this.screen.width / 2));
+    const rightWidth = Math.max(1, this.screen.width - leftWidth);
+    const topHeight = Math.max(1, Math.floor(this.screen.height / 2));
+    const bottomHeight = Math.max(1, this.screen.height - topHeight);
+    const rightX = this.screen.x + leftWidth;
+    const bottomY = this.screen.y + topHeight;
 
     switch (position) {
       case Position.LEFT:
@@ -566,6 +828,51 @@ export default class Tile {
       Math.abs(a.y - b.y) <= tolerance &&
       Math.abs(a.width - b.width) <= tolerance &&
       Math.abs(a.height - b.height) <= tolerance;
+  }
+
+  private startDebugTrace(label: string) {
+    if (!this.settings.get_boolean('debug-logging')) {
+      this.debugTrace = null;
+      return;
+    }
+
+    const now = GLib.get_monotonic_time();
+    this.debugTrace = {
+      label,
+      startTime: now,
+      lastTime: now
+    };
+
+    this.debugLog('start');
+  }
+
+  private finishDebugTrace() {
+    if (!this.debugTrace) {
+      return;
+    }
+
+    this.debugLog('finish');
+    this.debugTrace = null;
+  }
+
+  private debugLog(message: string) {
+    if (!this.debugTrace || !this.settings.get_boolean('debug-logging')) {
+      return;
+    }
+
+    const now = GLib.get_monotonic_time();
+    const totalMs = Math.round((now - this.debugTrace.startTime) / 1000);
+    const deltaMs = Math.round((now - this.debugTrace.lastTime) / 1000);
+    this.debugTrace.lastTime = now;
+
+    console.log(
+      `Sane Tiling debug [${this.debugTrace.label}] +${totalMs}ms ` +
+      `(${deltaMs}ms): ${message}`
+    );
+  }
+
+  private formatRect(rect: Mtk.Rectangle) {
+    return `${rect.x},${rect.y} ${rect.width}x${rect.height}`;
   }
 
   private copyRect(rect: Mtk.Rectangle) {

@@ -16,5 +16,10 @@
       <summary>Restore the window to its previous normal position</summary>
       <description>Keyboard shortcut for restoring a snapped or maximized window to its previous normal size and position</description>
     </key>
+    <key name="debug-logging" type="b">
+      <default>false</default>
+      <summary>Enable debug logging</summary>
+      <description>Log timing details for Sane Tiling window operations</description>
+    </key>
   </schema>
 </schemalist>

@@ -13,7 +13,7 @@ export default class TileManager {
   }
 
   private createTileForWindow(window: Meta.Window) {
-    const tile = new Tile(window);
+    const tile = new Tile(window, this.settings);
     const windowId = window.get_id();
 
     this.tiles.set(windowId, tile);
@@ -33,7 +33,7 @@ export default class TileManager {
 
     const existingTile = this.tiles.get(window.get_id());
     const tile = existingTile ?? this.createTileForWindow(window);
-    tile.reloadScreen(this.settings.get_int('gap-size'));
+    tile.reloadScreen();
 
     return tile;
   }
