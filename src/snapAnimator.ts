@@ -1,7 +1,8 @@
 import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
 import Mtk from 'gi://Mtk';
-import St from 'gi://St';
+
+import * as AnimationUtils from 'resource:///org/gnome/shell/misc/animationUtils.js';
 
 const ANIMATION_TIME = 250;
 
@@ -15,7 +16,7 @@ export default class SnapAnimator {
 
   captureVisualRect() {
     const rect = this.window.get_frame_rect();
-    const actor = this.window.get_compositor_private();
+    const actor = this.window.get_compositor_private<Meta.WindowActor>();
 
     if (!actor) {
       return this.copyRect(rect);
@@ -30,7 +31,7 @@ export default class SnapAnimator {
   }
 
   animate(sourceRect: Mtk.Rectangle, targetRect: Mtk.Rectangle) {
-    const actor = this.window.get_compositor_private();
+    const actor = this.window.get_compositor_private<Meta.WindowActor>();
     const token = ++this.animationToken;
 
     this.resetActor(actor);
@@ -40,8 +41,9 @@ export default class SnapAnimator {
       return;
     }
 
-    const { reducedMotion } = St.Settings.get();
-    if (reducedMotion === St.ReducedMotion.REDUCE) {
+    const duration = AnimationUtils.adjustAnimationTime(ANIMATION_TIME);
+
+    if (duration <= 0) {
       return;
     }
 
@@ -52,11 +54,11 @@ export default class SnapAnimator {
     actor.scale_y = sourceRect.height / targetRect.height;
 
     actor.ease({
-      translation_x: 0,
-      translation_y: 0,
-      scale_x: 1,
-      scale_y: 1,
-      duration: ANIMATION_TIME,
+      translationX: 0,
+      translationY: 0,
+      scaleX: 1,
+      scaleY: 1,
+      duration,
       mode: Clutter.AnimationMode.EASE_OUT_QUAD,
       onStopped: () => {
         if (token === this.animationToken) {
@@ -68,7 +70,7 @@ export default class SnapAnimator {
 
   cancel() {
     this.animationToken++;
-    this.resetActor(this.window.get_compositor_private());
+    this.resetActor(this.window.get_compositor_private<Meta.WindowActor>());
   }
 
   destroy() {
