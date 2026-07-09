@@ -1,12 +1,12 @@
 {
-  "name": "Smart Tiling",
+  "name": "Sane Tiling",
   "description": "Experimental Windows-style keyboard snapping for GNOME. Uses GNOME's existing snap/maximize keybindings, supports chained corner snapping, native maximize/minimize behavior, constrained-window anchoring, and animated half/corner transitions.",
-  "uuid": "smarttiling@samuelnovaes",
+  "uuid": "sane-tiling@nullstring.io",
   "shell-version": [
     "49",
     "50"
   ],
   "version": 7,
-  "settings-schema": "org.gnome.shell.extensions.smarttiling",
-  "url": "https://github.com/samuelnovaes/smart-tiling"
+  "settings-schema": "org.gnome.shell.extensions.sane-tiling",
+  "url": "https://github.com/bjlaur/sane-tiling"
 }

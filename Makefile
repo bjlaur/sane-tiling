@@ -1,4 +1,4 @@
-UUID := smarttiling@samuelnovaes
+UUID := sane-tiling@nullstring.io
 ZIP := $(UUID).zip
 
 .PHONY: all package install enable disable clean

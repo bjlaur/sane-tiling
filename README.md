@@ -1,4 +1,4 @@
-# Smart Tiling — experimental Windows-style snap fork
+# Sane Tiling — experimental Windows-style snap fork
 
 This is a first-pass rework of Samuel Novaes's Smart Tiling GNOME Shell extension.
 
@@ -21,6 +21,6 @@ npm install
 npm run build
 ```
 
-The upstream build creates `smarttiling@samuelnovaes.zip`.
+The build creates `sane-tiling@nullstring.io.zip`.
 
-For the engineering rationale, known risks, and Codex review checklist, see `smart-tiling-codex-handoff.md`.
+For the engineering rationale, known risks, and Codex review checklist, see `.agentic/smart-tiling-codex-handoff.md`.

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.smarttiling" path="/org/gnome/shell/extensions/smarttiling/">
+  <schema id="org.gnome.shell.extensions.sane-tiling" path="/org/gnome/shell/extensions/sane-tiling/">
     <key name="gap-size" type="i">
       <default>4</default>
       <summary>Size of the gaps between windows</summary>
