@@ -145,7 +145,7 @@ export default class Tile {
 
   minimize() {
     if (!this.window.can_minimize()) {
-      return;
+      return false;
     }
 
     this.beginOperation();
@@ -153,6 +153,20 @@ export default class Tile {
     this.position = Position.CENTER;
     this.lastSettledRect = null;
     this.window.minimize();
+    return true;
+  }
+
+  restoreMinimized() {
+    if (!this.window.minimized) {
+      return false;
+    }
+
+    this.beginOperation();
+    this.position = Position.CENTER;
+    this.window.unminimize();
+    this.window.activate(global.get_current_time());
+    this.lastSettledRect = this.copyRect(this.window.get_frame_rect());
+    return true;
   }
 
   reloadScreen(gapSize: number) {

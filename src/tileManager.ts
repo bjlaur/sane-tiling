@@ -5,6 +5,7 @@ import Tile from './tile.js';
 
 export default class TileManager {
   private tiles: Map<number, Tile> = new Map();
+  private lastMinimizedTile: Tile | null = null;
   private settings: Gio.Settings;
 
   constructor(settings: Gio.Settings) {
@@ -50,6 +51,10 @@ export default class TileManager {
     const position = tile?.getPosition();
 
     if (!tile || position === undefined) {
+      if (this.lastMinimizedTile?.restoreMinimized()) {
+        this.lastMinimizedTile = null;
+      }
+
       return;
     }
 
@@ -73,8 +78,7 @@ export default class TileManager {
       return;
     }
 
-    if (position === Position.TOP_LEFT || position === Position.TOP_RIGHT ||
-        position === Position.MAXIMIZED) {
+    if (position === Position.MAXIMIZED) {
       return;
     }
 
@@ -114,7 +118,9 @@ export default class TileManager {
       return;
     }
 
-    tile.minimize();
+    if (tile.minimize()) {
+      this.lastMinimizedTile = tile;
+    }
   }
 
   destroy() {
@@ -123,5 +129,6 @@ export default class TileManager {
     }
 
     this.tiles.clear();
+    this.lastMinimizedTile = null;
   }
 }

@@ -53,13 +53,16 @@ export default class SnapAnimator {
     actor.scale_x = sourceRect.width / targetRect.width;
     actor.scale_y = sourceRect.height / targetRect.height;
 
-    actor.ease({
-      translationX: 0,
-      translationY: 0,
-      scaleX: 1,
-      scaleY: 1,
+    const animationParams = {
       duration,
-      mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+      mode: Clutter.AnimationMode.EASE_OUT_QUAD
+    };
+
+    actor.ease_property('translation-x', 0, animationParams);
+    actor.ease_property('translation-y', 0, animationParams);
+    actor.ease_property('scale-x', 1, animationParams);
+    actor.ease_property('scale-y', 1, {
+      ...animationParams,
       onStopped: () => {
         if (token === this.animationToken) {
           this.resetActor(actor);
