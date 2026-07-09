@@ -34,24 +34,20 @@ export default class SnapAnimator {
     const actor = this.window.get_compositor_private<Meta.WindowActor>();
     const token = ++this.animationToken;
 
-    this.resetActor(actor);
-
-    if (!actor || sourceRect.width <= 0 || sourceRect.height <= 0 ||
-        targetRect.width <= 0 || targetRect.height <= 0) {
+    if (!this.canAnimate(actor, sourceRect, targetRect)) {
       return;
     }
 
     const duration = AnimationUtils.adjustAnimationTime(ANIMATION_TIME);
 
     if (duration <= 0) {
+      this.resetActor(actor);
       return;
     }
 
-    actor.set_pivot_point(0, 0);
-    actor.translation_x = sourceRect.x - targetRect.x;
-    actor.translation_y = sourceRect.y - targetRect.y;
-    actor.scale_x = sourceRect.width / targetRect.width;
-    actor.scale_y = sourceRect.height / targetRect.height;
+    if (this.isIdentity(actor)) {
+      this.setInvertedTransform(actor, sourceRect, targetRect);
+    }
 
     const animationParams = {
       duration,
@@ -69,6 +65,19 @@ export default class SnapAnimator {
         }
       }
     });
+  }
+
+  prepare(sourceRect: Mtk.Rectangle, targetRect: Mtk.Rectangle) {
+    const actor = this.window.get_compositor_private<Meta.WindowActor>();
+
+    this.resetActor(actor);
+
+    if (!this.canAnimate(actor, sourceRect, targetRect) ||
+        AnimationUtils.adjustAnimationTime(ANIMATION_TIME) <= 0) {
+      return;
+    }
+
+    this.setInvertedTransform(actor, sourceRect, targetRect);
   }
 
   cancel() {
@@ -94,6 +103,37 @@ export default class SnapAnimator {
     actor.scale_x = 1;
     actor.scale_y = 1;
     actor.set_pivot_point(0, 0);
+  }
+
+  private canAnimate(
+    actor: Meta.WindowActor | null,
+    sourceRect: Mtk.Rectangle,
+    targetRect: Mtk.Rectangle
+  ) {
+    return !!actor &&
+      sourceRect.width > 0 &&
+      sourceRect.height > 0 &&
+      targetRect.width > 0 &&
+      targetRect.height > 0;
+  }
+
+  private isIdentity(actor: Meta.WindowActor) {
+    return actor.translation_x === 0 &&
+      actor.translation_y === 0 &&
+      actor.scale_x === 1 &&
+      actor.scale_y === 1;
+  }
+
+  private setInvertedTransform(
+    actor: Meta.WindowActor,
+    sourceRect: Mtk.Rectangle,
+    targetRect: Mtk.Rectangle
+  ) {
+    actor.set_pivot_point(0, 0);
+    actor.translation_x = sourceRect.x - targetRect.x;
+    actor.translation_y = sourceRect.y - targetRect.y;
+    actor.scale_x = sourceRect.width / targetRect.width;
+    actor.scale_y = sourceRect.height / targetRect.height;
   }
 
   private copyRect(rect: Mtk.Rectangle) {

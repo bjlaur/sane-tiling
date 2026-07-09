@@ -16,6 +16,14 @@ type WaitState = {
   hardTimeoutId: number;
 };
 
+export type WindowSnapshot = {
+  window: Meta.Window;
+  position: Position;
+  rect: Mtk.Rectangle;
+  maximized: boolean;
+  minimized: boolean;
+};
+
 export default class Tile {
   private window: Meta.Window;
   private screen: Mtk.Rectangle = new Mtk.Rectangle();
@@ -65,12 +73,12 @@ export default class Tile {
 
   move(position: Position) {
     if (!this.canSnap()) {
-      return;
+      return false;
     }
 
     const targetRect = this.getTargetRect(position);
     if (!targetRect) {
-      return;
+      return false;
     }
 
     const sourceRect = this.animator.captureVisualRect();
@@ -93,6 +101,7 @@ export default class Tile {
         this.finishResize(token, position, sourceRect, false);
       });
 
+      this.animator.prepare(sourceRect, targetRect);
       this.window.move_resize_frame(
         true,
         targetRect.x,
@@ -105,15 +114,16 @@ export default class Tile {
     if (this.window.get_maximize_flags() > 0) {
       this.waitForGeometry(token, resize);
       this.window.unmaximize();
-      return;
+      return true;
     }
 
     resize();
+    return true;
   }
 
   maximize() {
     if (!this.window.can_maximize()) {
-      return;
+      return false;
     }
 
     this.beginOperation();
@@ -126,6 +136,7 @@ export default class Tile {
     this.position = Position.MAXIMIZED;
     this.lastSettledRect = null;
     this.window.maximize();
+    return true;
   }
 
   restore() {
@@ -141,6 +152,7 @@ export default class Tile {
     });
 
     this.window.unmaximize();
+    return true;
   }
 
   minimize() {
@@ -153,19 +165,6 @@ export default class Tile {
     this.position = Position.CENTER;
     this.lastSettledRect = null;
     this.window.minimize();
-    return true;
-  }
-
-  restoreMinimized() {
-    if (!this.window.minimized) {
-      return false;
-    }
-
-    this.beginOperation();
-    this.position = Position.CENTER;
-    this.window.unminimize();
-    this.window.activate(global.get_current_time());
-    this.lastSettledRect = this.copyRect(this.window.get_frame_rect());
     return true;
   }
 
@@ -202,6 +201,70 @@ export default class Tile {
     }
 
     this.signals.clear();
+  }
+
+  captureSnapshot(): WindowSnapshot {
+    return {
+      window: this.window,
+      position: this.getPosition(),
+      rect: this.copyRect(this.window.get_frame_rect()),
+      maximized: this.window.get_maximize_flags() > 0,
+      minimized: this.window.minimized
+    };
+  }
+
+  applySnapshot(snapshot: WindowSnapshot) {
+    const token = this.beginOperation();
+    this.animator.cancel();
+    this.position = snapshot.position;
+
+    if (this.window.minimized) {
+      this.window.unminimize();
+    }
+
+    if (snapshot.minimized) {
+      this.window.minimize();
+      this.lastSettledRect = null;
+      return;
+    }
+
+    this.window.activate(global.get_current_time());
+
+    if (snapshot.maximized) {
+      this.window.maximize();
+      this.position = Position.MAXIMIZED;
+      this.lastSettledRect = null;
+      return;
+    }
+
+    const restoreGeometry = () => {
+      if (token !== this.operationToken) {
+        return;
+      }
+
+      const sourceRect = this.animator.captureVisualRect();
+      this.animator.prepare(sourceRect, snapshot.rect);
+      this.waitForGeometry(token, () => {
+        this.clearWaitState();
+        this.lastSettledRect = this.copyRect(this.window.get_frame_rect());
+        this.animator.animate(sourceRect, this.window.get_frame_rect());
+      });
+      this.window.move_resize_frame(
+        true,
+        snapshot.rect.x,
+        snapshot.rect.y,
+        snapshot.rect.width,
+        snapshot.rect.height
+      );
+    };
+
+    if (this.window.get_maximize_flags() > 0) {
+      this.waitForGeometry(token, restoreGeometry);
+      this.window.unmaximize();
+      return;
+    }
+
+    restoreGeometry();
   }
 
   private beginOperation() {

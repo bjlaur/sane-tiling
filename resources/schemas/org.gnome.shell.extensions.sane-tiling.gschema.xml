@@ -6,5 +6,10 @@
       <summary>Size of the gaps between windows</summary>
       <description>Size of the gaps between windows (in pixels)</description>
     </key>
+    <key name="undo-window" type="as">
+      <default><![CDATA[['<Super>z']]]></default>
+      <summary>Undo the last Sane Tiling window action</summary>
+      <description>Keyboard shortcut for undoing Sane Tiling window actions</description>
+    </key>
   </schema>
 </schemalist>

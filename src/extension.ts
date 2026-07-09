@@ -12,12 +12,13 @@ export default class SmartTilingExtension extends Extension {
   override enable() {
     this.settings = this.getSettings();
     this.tileManager = new TileManager(this.settings);
-    this.keybindings = new Keybindings();
+    this.keybindings = new Keybindings(this.settings);
 
-    this.keybindings.add('toggle-tiled-left', this.tileManager.moveLeft.bind(this.tileManager));
-    this.keybindings.add('toggle-tiled-right', this.tileManager.moveRight.bind(this.tileManager));
-    this.keybindings.add('maximize', this.tileManager.moveUp.bind(this.tileManager));
-    this.keybindings.add('unmaximize', this.tileManager.moveDown.bind(this.tileManager));
+    this.keybindings.addBuiltin('toggle-tiled-left', this.tileManager.moveLeft.bind(this.tileManager));
+    this.keybindings.addBuiltin('toggle-tiled-right', this.tileManager.moveRight.bind(this.tileManager));
+    this.keybindings.addBuiltin('maximize', this.tileManager.moveUp.bind(this.tileManager));
+    this.keybindings.addBuiltin('unmaximize', this.tileManager.moveDown.bind(this.tileManager));
+    this.keybindings.addExtension('undo-window', this.tileManager.undo.bind(this.tileManager));
   }
 
   override disable() {

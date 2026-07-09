@@ -1,11 +1,11 @@
 import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 
-import Tile from './tile.js';
+import Tile, { type WindowSnapshot } from './tile.js';
 
 export default class TileManager {
   private tiles: Map<number, Tile> = new Map();
-  private lastMinimizedTile: Tile | null = null;
+  private undoStack: WindowSnapshot[] = [];
   private settings: Gio.Settings;
 
   constructor(settings: Gio.Settings) {
@@ -39,11 +39,21 @@ export default class TileManager {
   }
 
   moveRight() {
-    this.getCurrentTile()?.move(Position.RIGHT);
+    this.move(Position.RIGHT);
   }
 
   moveLeft() {
-    this.getCurrentTile()?.move(Position.LEFT);
+    this.move(Position.LEFT);
+  }
+
+  undo() {
+    const snapshot = this.undoStack.pop();
+
+    if (!snapshot) {
+      return;
+    }
+
+    this.getTileForWindow(snapshot.window).applySnapshot(snapshot);
   }
 
   moveUp() {
@@ -51,30 +61,26 @@ export default class TileManager {
     const position = tile?.getPosition();
 
     if (!tile || position === undefined) {
-      if (this.lastMinimizedTile?.restoreMinimized()) {
-        this.lastMinimizedTile = null;
-      }
-
       return;
     }
 
     if (position === Position.BOTTOM_LEFT) {
-      tile.move(Position.LEFT);
+      this.moveTile(tile, Position.LEFT);
       return;
     }
 
     if (position === Position.LEFT) {
-      tile.move(Position.TOP_LEFT);
+      this.moveTile(tile, Position.TOP_LEFT);
       return;
     }
 
     if (position === Position.BOTTOM_RIGHT) {
-      tile.move(Position.RIGHT);
+      this.moveTile(tile, Position.RIGHT);
       return;
     }
 
     if (position === Position.RIGHT) {
-      tile.move(Position.TOP_RIGHT);
+      this.moveTile(tile, Position.TOP_RIGHT);
       return;
     }
 
@@ -82,7 +88,7 @@ export default class TileManager {
       return;
     }
 
-    tile.maximize();
+    this.maximizeTile(tile);
   }
 
   moveDown() {
@@ -94,33 +100,31 @@ export default class TileManager {
     }
 
     if (position === Position.TOP_LEFT) {
-      tile.move(Position.LEFT);
+      this.moveTile(tile, Position.LEFT);
       return;
     }
 
     if (position === Position.LEFT) {
-      tile.move(Position.BOTTOM_LEFT);
+      this.moveTile(tile, Position.BOTTOM_LEFT);
       return;
     }
 
     if (position === Position.TOP_RIGHT) {
-      tile.move(Position.RIGHT);
+      this.moveTile(tile, Position.RIGHT);
       return;
     }
 
     if (position === Position.RIGHT) {
-      tile.move(Position.BOTTOM_RIGHT);
+      this.moveTile(tile, Position.BOTTOM_RIGHT);
       return;
     }
 
     if (position === Position.MAXIMIZED) {
-      tile.restore();
+      this.restoreTile(tile);
       return;
     }
 
-    if (tile.minimize()) {
-      this.lastMinimizedTile = tile;
-    }
+    this.minimizeTile(tile);
   }
 
   destroy() {
@@ -129,6 +133,58 @@ export default class TileManager {
     }
 
     this.tiles.clear();
-    this.lastMinimizedTile = null;
+    this.undoStack = [];
+  }
+
+  private getTileForWindow(window: Meta.Window) {
+    return this.tiles.get(window.get_id()) ?? this.createTileForWindow(window);
+  }
+
+  private move(position: Position) {
+    const tile = this.getCurrentTile();
+
+    if (tile) {
+      this.moveTile(tile, position);
+    }
+  }
+
+  private moveTile(tile: Tile, position: Position) {
+    const snapshot = tile.captureSnapshot();
+
+    if (tile.move(position)) {
+      this.pushUndo(snapshot);
+    }
+  }
+
+  private maximizeTile(tile: Tile) {
+    const snapshot = tile.captureSnapshot();
+
+    if (tile.maximize()) {
+      this.pushUndo(snapshot);
+    }
+  }
+
+  private restoreTile(tile: Tile) {
+    const snapshot = tile.captureSnapshot();
+
+    if (tile.restore()) {
+      this.pushUndo(snapshot);
+    }
+  }
+
+  private minimizeTile(tile: Tile) {
+    const snapshot = tile.captureSnapshot();
+
+    if (tile.minimize()) {
+      this.pushUndo(snapshot);
+    }
+  }
+
+  private pushUndo(snapshot: WindowSnapshot) {
+    this.undoStack.push(snapshot);
+
+    if (this.undoStack.length > 50) {
+      this.undoStack.shift();
+    }
   }
 }
