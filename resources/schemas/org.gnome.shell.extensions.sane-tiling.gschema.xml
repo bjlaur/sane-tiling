@@ -1,11 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.gnome.shell.extensions.sane-tiling" path="/org/gnome/shell/extensions/sane-tiling/">
-    <key name="gap-size" type="i">
-      <default>4</default>
-      <summary>Size of the gaps between windows</summary>
-      <description>Size of the gaps between windows (in pixels)</description>
-    </key>
     <key name="undo-window" type="as">
       <default><![CDATA[['<Super>z']]]></default>
       <summary>Undo the last Sane Tiling window action</summary>

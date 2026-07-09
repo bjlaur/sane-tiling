@@ -411,12 +411,12 @@ export default class Tile {
 
       if (horizontallyMaximized) {
         this.debugLog(
-          `experimental horizontal unmaximize before flags=${flags} ` +
+          `horizontal unmaximize before flags=${flags} ` +
           `h=${this.window.maximized_horizontally} v=${this.window.maximized_vertically}`
         );
         this.window.set_unmaximize_flags(Meta.MaximizeFlags.HORIZONTAL);
         this.debugLog(
-          `experimental horizontal unmaximize after flags=${this.window.get_maximize_flags()} ` +
+          `horizontal unmaximize after flags=${this.window.get_maximize_flags()} ` +
           `h=${this.window.maximized_horizontally} v=${this.window.maximized_vertically}`
         );
         this.moveNormal(token, position, sourceRect, targetRect);

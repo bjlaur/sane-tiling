@@ -17,13 +17,14 @@ export default class Keybindings {
       const added = Meta.keybindings_set_custom_handler(key, handler);
 
       if (!added) {
-        console.error(`Smart Tiling: builtin keybinding ${key} was not found`);
+        console.error(`Sane Tiling: builtin keybinding ${key} was not found`);
         return;
       }
 
       this.builtinBindings.add(key);
-    } catch (error) {
-      console.error(`Smart Tiling: failed to override ${key}: ${error}`);
+    }
+    catch (error) {
+      console.error(`Sane Tiling: failed to override ${key}: ${error}`);
     }
   }
 
@@ -37,8 +38,9 @@ export default class Keybindings {
         handler
       );
       this.extensionBindings.add(key);
-    } catch (error) {
-      console.error(`Smart Tiling: failed to add ${key}: ${error}`);
+    }
+    catch (error) {
+      console.error(`Sane Tiling: failed to add ${key}: ${error}`);
     }
   }
 
@@ -46,16 +48,18 @@ export default class Keybindings {
     for (const key of this.extensionBindings) {
       try {
         Main.wm.removeKeybinding(key);
-      } catch (error) {
-        console.error(`Smart Tiling: failed to remove ${key}: ${error}`);
+      }
+      catch (error) {
+        console.error(`Sane Tiling: failed to remove ${key}: ${error}`);
       }
     }
 
     for (const key of this.builtinBindings) {
       try {
         Meta.keybindings_set_custom_handler(key, null);
-      } catch (error) {
-        console.error(`Smart Tiling: failed to restore ${key}: ${error}`);
+      }
+      catch (error) {
+        console.error(`Sane Tiling: failed to restore ${key}: ${error}`);
       }
     }
 

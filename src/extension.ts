@@ -4,7 +4,7 @@ import Gio from 'gi://Gio';
 import Keybindings from './keybindings.js';
 import TileManager from './tileManager.js';
 
-export default class SmartTilingExtension extends Extension {
+export default class SaneTilingExtension extends Extension {
   private keybindings: Keybindings | null = null;
   private settings: Gio.Settings | null = null;
   private tileManager: TileManager | null = null;

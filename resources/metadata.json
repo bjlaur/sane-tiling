@@ -1,6 +1,6 @@
 {
   "name": "Sane Tiling",
-  "description": "Experimental Windows-style keyboard snapping for GNOME. Uses GNOME's existing snap/maximize keybindings, supports chained corner snapping, native maximize/minimize behavior, constrained-window anchoring, and animated half/corner transitions.",
+  "description": "Windows-style keyboard snapping for GNOME. Uses GNOME's existing snap and maximize shortcuts, with chained corner snapping, native maximize/minimize behavior, undo, restore, and animated half/corner transitions.",
   "uuid": "sane-tiling@nullstring.io",
   "shell-version": [
     "49",
