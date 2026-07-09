@@ -1,38 +1,26 @@
-# Smart Tile
+# Smart Tiling — experimental Windows-style snap fork
 
-**WinTile** brings **Windows 10–style window snapping and tiling** to your GNOME desktop.  
-Quickly organize and resize windows using familiar shortcuts — **Super + Arrow Keys** — to snap windows to halves or corners of your screen.
+This is a first-pass rework of Samuel Novaes's Smart Tiling GNOME Shell extension.
 
-## Features
+The goal is Windows-style keyboard snapping without rewriting GNOME/Mutter keybinding settings:
 
-- **Snap windows with Super + Arrow Keys** — just like in Windows 10  
-- **Half and corner tiling** for efficient multitasking  
-- **Multi-monitor support** — windows snap on the active display  
+- Left/right snap to halves.
+- Left then Up/Down snaps to the left corners.
+- Right then Up/Down snaps to the right corners.
+- Up from a normal window maximizes.
+- Down from maximized restores; Down from a normal window minimizes.
+- Half/corner snaps use a FLIP-style `Meta.WindowActor.ease()` animation.
+- Constrained windows get one resize request and at most one edge-anchor correction.
 
-## Installation
+The extension overrides Mutter's built-in `toggle-tiled-left`, `toggle-tiled-right`, `maximize`, and `unmaximize` handlers. It does not change their configured accelerators or mutate GNOME/Mutter GSettings.
 
-### 1. Clone the repository and install dependencies
-
-```bash
-git clone https://github.com/samuelnovaes/smart-tiling
-cd smart-tiling
-npm ci
-```
-
-### 2. Build the aextension
+## Build
 
 ```bash
+npm install
 npm run build
 ```
 
-### 3. Install the extension
+The upstream build creates `smarttiling@samuelnovaes.zip`.
 
-```bash
-gnome-extensions install smarttiling@samuelnovaes.zip
-```
-
-### 4. Restart GNOME Shell session
-
-### 5. Enable the extension in the [GNOME Extensions App](https://flathub.org/en/apps/org.gnome.Extensions)
-
-### 5. Enjoy!
+For the engineering rationale, known risks, and Codex review checklist, see `smart-tiling-codex-handoff.md`.

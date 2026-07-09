@@ -1,6 +1,4 @@
 const enum Position {
-  TOP = 'top',
-  BOTTOM = 'bottom',
   LEFT = 'left',
   RIGHT = 'right',
   TOP_LEFT = 'top-left',

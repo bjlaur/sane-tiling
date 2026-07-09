@@ -6,7 +6,6 @@ import Gtk from 'gi://Gtk';
 export default class SmartTilingPreferences extends ExtensionPreferences {
   async fillPreferencesWindow(window: Adw.PreferencesWindow) {
     const settings = this.getSettings();
-
     const page = new Adw.PreferencesPage({
       title: _('Smart Tiling'),
       icon_name: 'view-grid-symbolic'

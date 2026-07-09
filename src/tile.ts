@@ -1,174 +1,175 @@
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Mtk from 'gi://Mtk';
-import GLib from 'gi://GLib';
+
+import SnapAnimator from './snapAnimator.js';
+
+const GEOMETRY_QUIET_TIME = 24;
+const GEOMETRY_HARD_TIMEOUT = 220;
+const RECT_TOLERANCE = 8;
+
+type WaitState = {
+  token: number;
+  signalIds: number[];
+  quietTimeoutId: number;
+  hardTimeoutId: number;
+};
 
 export default class Tile {
   private window: Meta.Window;
   private screen: Mtk.Rectangle = new Mtk.Rectangle();
-  private timeouts: Set<number> = new Set();
-  private gapSize: number = 0;
+  private gapSize = 0;
+  private position = Position.CENTER;
+  private lastSettledRect: Mtk.Rectangle | null = null;
+  private restoreRect: Mtk.Rectangle | null = null;
   private signals: Set<number> = new Set();
+  private waitState: WaitState | null = null;
+  private operationToken = 0;
+  private animator: SnapAnimator;
 
   constructor(window: Meta.Window) {
     this.window = window;
+    this.animator = new SnapAnimator(window);
+    this.lastSettledRect = this.copyRect(window.get_frame_rect());
   }
 
   getPosition() {
-    const bounds = this.window.get_frame_rect();
-    const top = bounds.y <= this.screen.y;
-    const bottom = (bounds.y + bounds.height) >= (this.screen.y + this.screen.height);
-    const left = bounds.x <= this.screen.x;
-    const right = (bounds.x + bounds.width) >= (this.screen.x + this.screen.width);
-    if (top && !bottom && left && right) {
-      return Position.TOP;
-    }
-    if (!top && bottom && left && right) {
-      return Position.BOTTOM;
-    }
-    if (top && bottom && left && !right) {
-      return Position.LEFT;
-    }
-    if (top && bottom && !left && right) {
-      return Position.RIGHT;
-    }
-    if (top && !bottom && left && !right) {
-      return Position.TOP_LEFT;
-    }
-    if (top && !bottom && !left && right) {
-      return Position.TOP_RIGHT;
-    }
-    if (!top && bottom && left && !right) {
-      return Position.BOTTOM_LEFT;
-    }
-    if (!top && bottom && !left && right) {
-      return Position.BOTTOM_RIGHT;
-    }
-    if (top && bottom && left && right) {
-      return Position.MAXIMIZED;
-    }
-    return Position.CENTER;
-  }
-
-  private doMove(position: Position) {
-    const halfGap = this.gapSize / 2;
-
-    if (position === Position.MAXIMIZED) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x,
-        this.screen.y,
-        this.screen.width,
-        this.screen.height
-      );
+    if (this.waitState) {
+      return this.position;
     }
 
-    if (position === Position.TOP) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x,
-        this.screen.y,
-        this.screen.width,
-        this.screen.height / 2 - halfGap
-      );
+    if (this.window.get_maximize_flags() > 0) {
+      this.position = Position.MAXIMIZED;
+      return this.position;
     }
 
-    if (position === Position.BOTTOM) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x,
-        this.screen.y + (this.screen.height / 2) + halfGap,
-        this.screen.width,
-        this.screen.height / 2 - halfGap
-      );
+    const currentRect = this.window.get_frame_rect();
+
+    if (this.position === Position.MAXIMIZED) {
+      this.position = Position.CENTER;
+      this.lastSettledRect = this.copyRect(currentRect);
+    } else if (this.lastSettledRect &&
+        !this.rectNear(currentRect, this.lastSettledRect, RECT_TOLERANCE)) {
+      this.animator.cancel();
+      this.position = this.detectPosition(currentRect);
+      this.lastSettledRect = this.copyRect(currentRect);
+
+      if (this.position === Position.CENTER) {
+        this.restoreRect = this.copyRect(currentRect);
+      }
     }
 
-    if (position === Position.LEFT) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x,
-        this.screen.y,
-        this.screen.width / 2 - halfGap,
-        this.screen.height
-      );
-    }
-
-    if (position === Position.RIGHT) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x + (this.screen.width / 2) + halfGap,
-        this.screen.y,
-        this.screen.width / 2 - halfGap,
-        this.screen.height
-      );
-    }
-
-    if (position === Position.TOP_LEFT) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x,
-        this.screen.y,
-        this.screen.width / 2 - halfGap,
-        this.screen.height / 2 - halfGap
-      );
-    }
-
-    if (position === Position.TOP_RIGHT) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x + (this.screen.width / 2) + halfGap,
-        this.screen.y,
-        this.screen.width / 2 - halfGap,
-        this.screen.height / 2 - halfGap
-      );
-    }
-
-    if (position === Position.BOTTOM_LEFT) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x,
-        this.screen.y + (this.screen.height / 2) + halfGap,
-        this.screen.width / 2 - halfGap,
-        this.screen.height / 2 - halfGap
-      );
-    }
-
-    if (position === Position.BOTTOM_RIGHT) {
-      return this.window.move_resize_frame(
-        true,
-        this.screen.x + this.screen.width / 2 + halfGap,
-        this.screen.y + this.screen.height / 2 + halfGap,
-        this.screen.width / 2 - halfGap,
-        this.screen.height / 2 - halfGap
-      );
-    }
+    return this.position;
   }
 
   move(position: Position) {
-    if (this.window.get_maximize_flags() > 0) {
-      this.window.unmaximize();
-      const timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 20, () => {
-        this.doMove(position);
-        if (this.getPosition() === position) {
-          this.timeouts.delete(timeoutId);
-          return GLib.SOURCE_REMOVE;
-        }
-        return GLib.SOURCE_CONTINUE;
-      });
-      this.timeouts.add(timeoutId);
+    if (!this.canSnap()) {
       return;
     }
-    return this.doMove(position);
+
+    const targetRect = this.getTargetRect(position);
+    if (!targetRect) {
+      return;
+    }
+
+    const sourceRect = this.animator.captureVisualRect();
+    const previousPosition = this.getPosition();
+    const token = this.beginOperation();
+
+    if (previousPosition === Position.CENTER) {
+      this.restoreRect = this.copyRect(this.window.get_frame_rect());
+    }
+
+    this.position = position;
+    this.animator.cancel();
+
+    const resize = () => {
+      if (token !== this.operationToken) {
+        return;
+      }
+
+      this.waitForGeometry(token, () => {
+        this.finishResize(token, position, sourceRect, false);
+      });
+
+      this.window.move_resize_frame(
+        true,
+        targetRect.x,
+        targetRect.y,
+        targetRect.width,
+        targetRect.height
+      );
+    };
+
+    if (this.window.get_maximize_flags() > 0) {
+      this.waitForGeometry(token, resize);
+      this.window.unmaximize();
+      return;
+    }
+
+    resize();
+  }
+
+  maximize() {
+    if (!this.window.can_maximize()) {
+      return;
+    }
+
+    this.beginOperation();
+    this.animator.cancel();
+
+    if (this.position === Position.CENTER) {
+      this.restoreRect = this.copyRect(this.window.get_frame_rect());
+    }
+
+    this.position = Position.MAXIMIZED;
+    this.lastSettledRect = null;
+    this.window.maximize();
+  }
+
+  restore() {
+    this.beginOperation();
+    this.animator.cancel();
+    this.position = Position.CENTER;
+    const token = this.operationToken;
+
+    this.waitForGeometry(token, () => {
+      const rect = this.window.get_frame_rect();
+      this.lastSettledRect = this.copyRect(rect);
+      this.restoreRect = this.copyRect(rect);
+    });
+
+    this.window.unmaximize();
+  }
+
+  minimize() {
+    if (!this.window.can_minimize()) {
+      return;
+    }
+
+    this.beginOperation();
+    this.animator.cancel();
+    this.position = Position.CENTER;
+    this.lastSettledRect = null;
+    this.window.minimize();
   }
 
   reloadScreen(gapSize: number) {
     const monitorIndex = this.window.get_monitor();
-    this.gapSize = gapSize;
-    this.screen = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
-    this.screen.x += gapSize;
-    this.screen.y += gapSize;
-    this.screen.width -= gapSize * 2;
-    this.screen.height -= gapSize * 2;
+    const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+
+    this.gapSize = Math.max(0, gapSize);
+    this.screen = new Mtk.Rectangle({
+      x: workArea.x + this.gapSize,
+      y: workArea.y + this.gapSize,
+      width: Math.max(1, workArea.width - this.gapSize * 2),
+      height: Math.max(1, workArea.height - this.gapSize * 2)
+    });
+
+    if (this.position === Position.CENTER && !this.waitState) {
+      this.position = this.detectPosition(this.window.get_frame_rect());
+    }
   }
 
   connect(signal: string, callback: (source: Meta.Window) => void) {
@@ -178,13 +179,264 @@ export default class Tile {
   }
 
   destroy() {
-    for (const timeoutId of this.timeouts) {
-      GLib.source_remove(timeoutId);
-    }
+    this.operationToken++;
+    this.clearWaitState();
+    this.animator.destroy();
+
     for (const signalId of this.signals) {
       this.window.disconnect(signalId);
     }
-    this.timeouts.clear();
+
     this.signals.clear();
+  }
+
+  private beginOperation() {
+    this.operationToken++;
+    this.clearWaitState();
+    return this.operationToken;
+  }
+
+  private canSnap() {
+    return this.window.get_window_type() === Meta.WindowType.NORMAL &&
+      !this.window.is_fullscreen() &&
+      this.window.allows_move() &&
+      this.window.allows_resize();
+  }
+
+  private finishResize(
+    token: number,
+    position: Position,
+    sourceRect: Mtk.Rectangle,
+    corrected: boolean
+  ) {
+    if (token !== this.operationToken) {
+      return;
+    }
+
+    const actualRect = this.window.get_frame_rect();
+    const correctedPosition = this.getAnchoredPosition(position, actualRect);
+
+    if (!corrected &&
+        (correctedPosition.x !== actualRect.x || correctedPosition.y !== actualRect.y)) {
+      this.waitForGeometry(token, () => {
+        this.finishResize(token, position, sourceRect, true);
+      });
+      this.window.move_frame(true, correctedPosition.x, correctedPosition.y);
+      return;
+    }
+
+    this.clearWaitState();
+    const settledRect = this.window.get_frame_rect();
+    this.position = position;
+    this.lastSettledRect = this.copyRect(settledRect);
+    this.animator.animate(sourceRect, settledRect);
+  }
+
+  private waitForGeometry(token: number, callback: () => void) {
+    this.clearWaitState();
+
+    const state: WaitState = {
+      token,
+      signalIds: [],
+      quietTimeoutId: 0,
+      hardTimeoutId: 0
+    };
+
+    const finish = () => {
+      if (this.waitState !== state || token !== this.operationToken) {
+        return GLib.SOURCE_REMOVE;
+      }
+
+      this.clearWaitState();
+      callback();
+      return GLib.SOURCE_REMOVE;
+    };
+
+    const queueQuietFinish = () => {
+      if (this.waitState !== state || token !== this.operationToken) {
+        return;
+      }
+
+      if (state.quietTimeoutId) {
+        GLib.source_remove(state.quietTimeoutId);
+      }
+
+      state.quietTimeoutId = GLib.timeout_add(
+        GLib.PRIORITY_DEFAULT,
+        GEOMETRY_QUIET_TIME,
+        () => {
+          state.quietTimeoutId = 0;
+          return finish();
+        }
+      );
+    };
+
+    state.signalIds.push(this.window.connect('size-changed', queueQuietFinish));
+    state.signalIds.push(this.window.connect('position-changed', queueQuietFinish));
+    state.hardTimeoutId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      GEOMETRY_HARD_TIMEOUT,
+      () => {
+        state.hardTimeoutId = 0;
+        return finish();
+      }
+    );
+
+    this.waitState = state;
+  }
+
+  private clearWaitState() {
+    const state = this.waitState;
+    if (!state) {
+      return;
+    }
+
+    this.waitState = null;
+
+    for (const signalId of state.signalIds) {
+      this.window.disconnect(signalId);
+    }
+
+    if (state.quietTimeoutId) {
+      GLib.source_remove(state.quietTimeoutId);
+    }
+
+    if (state.hardTimeoutId) {
+      GLib.source_remove(state.hardTimeoutId);
+    }
+  }
+
+  private getTargetRect(position: Position) {
+    const innerGap = this.gapSize;
+    const leftWidth = Math.max(1, Math.floor((this.screen.width - innerGap) / 2));
+    const rightWidth = Math.max(1, this.screen.width - innerGap - leftWidth);
+    const topHeight = Math.max(1, Math.floor((this.screen.height - innerGap) / 2));
+    const bottomHeight = Math.max(1, this.screen.height - innerGap - topHeight);
+    const rightX = this.screen.x + leftWidth + innerGap;
+    const bottomY = this.screen.y + topHeight + innerGap;
+
+    switch (position) {
+      case Position.LEFT:
+        return new Mtk.Rectangle({
+          x: this.screen.x,
+          y: this.screen.y,
+          width: leftWidth,
+          height: this.screen.height
+        });
+      case Position.RIGHT:
+        return new Mtk.Rectangle({
+          x: rightX,
+          y: this.screen.y,
+          width: rightWidth,
+          height: this.screen.height
+        });
+      case Position.TOP_LEFT:
+        return new Mtk.Rectangle({
+          x: this.screen.x,
+          y: this.screen.y,
+          width: leftWidth,
+          height: topHeight
+        });
+      case Position.TOP_RIGHT:
+        return new Mtk.Rectangle({
+          x: rightX,
+          y: this.screen.y,
+          width: rightWidth,
+          height: topHeight
+        });
+      case Position.BOTTOM_LEFT:
+        return new Mtk.Rectangle({
+          x: this.screen.x,
+          y: bottomY,
+          width: leftWidth,
+          height: bottomHeight
+        });
+      case Position.BOTTOM_RIGHT:
+        return new Mtk.Rectangle({
+          x: rightX,
+          y: bottomY,
+          width: rightWidth,
+          height: bottomHeight
+        });
+      default:
+        return null;
+    }
+  }
+
+  private getAnchoredPosition(position: Position, rect: Mtk.Rectangle) {
+    let x = rect.x;
+    let y = rect.y;
+
+    if (position === Position.LEFT || position === Position.TOP_LEFT ||
+        position === Position.BOTTOM_LEFT) {
+      x = this.screen.x;
+    } else if (position === Position.RIGHT || position === Position.TOP_RIGHT ||
+        position === Position.BOTTOM_RIGHT) {
+      x = this.screen.x + this.screen.width - rect.width;
+    }
+
+    if (position === Position.TOP_LEFT || position === Position.TOP_RIGHT ||
+        position === Position.LEFT || position === Position.RIGHT) {
+      y = this.screen.y;
+    } else if (position === Position.BOTTOM_LEFT || position === Position.BOTTOM_RIGHT) {
+      y = this.screen.y + this.screen.height - rect.height;
+    }
+
+    return { x, y };
+  }
+
+  private detectPosition(rect: Mtk.Rectangle) {
+    if (this.window.get_maximize_flags() > 0) {
+      return Position.MAXIMIZED;
+    }
+
+    const top = Math.abs(rect.y - this.screen.y) <= RECT_TOLERANCE;
+    const bottom = Math.abs((rect.y + rect.height) -
+      (this.screen.y + this.screen.height)) <= RECT_TOLERANCE;
+    const left = Math.abs(rect.x - this.screen.x) <= RECT_TOLERANCE;
+    const right = Math.abs((rect.x + rect.width) -
+      (this.screen.x + this.screen.width)) <= RECT_TOLERANCE;
+
+    if (top && bottom && left && !right) {
+      return Position.LEFT;
+    }
+
+    if (top && bottom && !left && right) {
+      return Position.RIGHT;
+    }
+
+    if (top && !bottom && left && !right) {
+      return Position.TOP_LEFT;
+    }
+
+    if (top && !bottom && !left && right) {
+      return Position.TOP_RIGHT;
+    }
+
+    if (!top && bottom && left && !right) {
+      return Position.BOTTOM_LEFT;
+    }
+
+    if (!top && bottom && !left && right) {
+      return Position.BOTTOM_RIGHT;
+    }
+
+    return Position.CENTER;
+  }
+
+  private rectNear(a: Mtk.Rectangle, b: Mtk.Rectangle, tolerance: number) {
+    return Math.abs(a.x - b.x) <= tolerance &&
+      Math.abs(a.y - b.y) <= tolerance &&
+      Math.abs(a.width - b.width) <= tolerance &&
+      Math.abs(a.height - b.height) <= tolerance;
+  }
+
+  private copyRect(rect: Mtk.Rectangle) {
+    return new Mtk.Rectangle({
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height
+    });
   }
 }

@@ -1,6 +1,7 @@
-import Tile from './tile.js';
-import Meta from 'gi://Meta';
 import Gio from 'gi://Gio';
+import Meta from 'gi://Meta';
+
+import Tile from './tile.js';
 
 export default class TileManager {
   private tiles: Map<number, Tile> = new Map();
@@ -13,11 +14,13 @@ export default class TileManager {
   private createTileForWindow(window: Meta.Window) {
     const tile = new Tile(window);
     const windowId = window.get_id();
+
     this.tiles.set(windowId, tile);
     tile.connect('unmanaged', () => {
       tile.destroy();
       this.tiles.delete(windowId);
     });
+
     return tile;
   }
 
@@ -26,95 +29,99 @@ export default class TileManager {
     if (!window) {
       return null;
     }
+
     const existingTile = this.tiles.get(window.get_id());
     const tile = existingTile ?? this.createTileForWindow(window);
-    const gapSize = this.settings.get_int('gap-size');
-    tile.reloadScreen(gapSize);
+    tile.reloadScreen(this.settings.get_int('gap-size'));
+
     return tile;
   }
 
   moveRight() {
-    const tile = this.getCurrentTile();
-    const position = tile?.getPosition();
-    if (position === Position.TOP_LEFT) {
-      return tile?.move(Position.TOP);
-    }
-    if (position === Position.TOP) {
-      return tile?.move(Position.TOP_RIGHT);
-    }
-    if (position === Position.BOTTOM_LEFT) {
-      return tile?.move(Position.BOTTOM);
-    }
-    if (position === Position.BOTTOM) {
-      return tile?.move(Position.BOTTOM_RIGHT);
-    }
-    return tile?.move(Position.RIGHT);
+    this.getCurrentTile()?.move(Position.RIGHT);
   }
 
   moveLeft() {
-    const tile = this.getCurrentTile();
-    const position = tile?.getPosition();
-    if (position === Position.TOP_RIGHT) {
-      return tile?.move(Position.TOP);
-    }
-    if (position === Position.TOP) {
-      return tile?.move(Position.TOP_LEFT);
-    }
-    if (position === Position.BOTTOM_RIGHT) {
-      return tile?.move(Position.BOTTOM);
-    }
-    if (position === Position.BOTTOM) {
-      return tile?.move(Position.BOTTOM_LEFT);
-    }
-    return tile?.move(Position.LEFT);
+    this.getCurrentTile()?.move(Position.LEFT);
   }
 
   moveUp() {
     const tile = this.getCurrentTile();
     const position = tile?.getPosition();
+
+    if (!tile || position === undefined) {
+      return;
+    }
+
     if (position === Position.BOTTOM_LEFT) {
-      return tile?.move(Position.LEFT);
+      tile.move(Position.LEFT);
+      return;
     }
+
     if (position === Position.LEFT) {
-      return tile?.move(Position.TOP_LEFT);
+      tile.move(Position.TOP_LEFT);
+      return;
     }
+
     if (position === Position.BOTTOM_RIGHT) {
-      return tile?.move(Position.RIGHT);
+      tile.move(Position.RIGHT);
+      return;
     }
+
     if (position === Position.RIGHT) {
-      return tile?.move(Position.TOP_RIGHT);
+      tile.move(Position.TOP_RIGHT);
+      return;
     }
-    if (position === Position.TOP) {
-      return tile?.move(Position.MAXIMIZED);
+
+    if (position === Position.TOP_LEFT || position === Position.TOP_RIGHT ||
+        position === Position.MAXIMIZED) {
+      return;
     }
-    return tile?.move(Position.TOP);
+
+    tile.maximize();
   }
 
   moveDown() {
     const tile = this.getCurrentTile();
     const position = tile?.getPosition();
+
+    if (!tile || position === undefined) {
+      return;
+    }
+
     if (position === Position.TOP_LEFT) {
-      return tile?.move(Position.LEFT);
+      tile.move(Position.LEFT);
+      return;
     }
+
     if (position === Position.LEFT) {
-      return tile?.move(Position.BOTTOM_LEFT);
+      tile.move(Position.BOTTOM_LEFT);
+      return;
     }
+
     if (position === Position.TOP_RIGHT) {
-      return tile?.move(Position.RIGHT);
+      tile.move(Position.RIGHT);
+      return;
     }
+
     if (position === Position.RIGHT) {
-      return tile?.move(Position.BOTTOM_RIGHT);
+      tile.move(Position.BOTTOM_RIGHT);
+      return;
     }
+
     if (position === Position.MAXIMIZED) {
-      return tile?.move(Position.TOP);
+      tile.restore();
+      return;
     }
-    return tile?.move(Position.BOTTOM);
+
+    tile.minimize();
   }
 
   destroy() {
     for (const tile of this.tiles.values()) {
       tile.destroy();
     }
+
     this.tiles.clear();
   }
 }
