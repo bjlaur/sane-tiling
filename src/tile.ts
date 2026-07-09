@@ -112,8 +112,11 @@ export default class Tile {
     };
 
     if (this.window.get_maximize_flags() > 0) {
-      this.waitForGeometry(token, resize);
       this.window.unmaximize();
+      GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+        resize();
+        return GLib.SOURCE_REMOVE;
+      });
       return true;
     }
 
@@ -274,10 +277,12 @@ export default class Tile {
   }
 
   private canSnap() {
+    const maximized = this.window.get_maximize_flags() > 0;
+
     return this.window.get_window_type() === Meta.WindowType.NORMAL &&
       !this.window.is_fullscreen() &&
       this.window.allows_move() &&
-      this.window.allows_resize();
+      (this.window.allows_resize() || maximized);
   }
 
   private finishResize(
