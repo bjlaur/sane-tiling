@@ -19,6 +19,7 @@ export default class SmartTilingExtension extends Extension {
     this.keybindings.addBuiltin('maximize', this.tileManager.moveUp.bind(this.tileManager));
     this.keybindings.addBuiltin('unmaximize', this.tileManager.moveDown.bind(this.tileManager));
     this.keybindings.addExtension('undo-window', this.tileManager.undo.bind(this.tileManager));
+    this.keybindings.addExtension('restore-window', this.tileManager.restoreNormal.bind(this.tileManager));
   }
 
   override disable() {

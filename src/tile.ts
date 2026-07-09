@@ -158,6 +158,61 @@ export default class Tile {
     return true;
   }
 
+  restoreNormal() {
+    if (!this.restoreRect) {
+      if (this.window.get_maximize_flags() > 0) {
+        return this.restore();
+      }
+
+      return false;
+    }
+
+    if (!this.window.allows_move() || !this.window.allows_resize()) {
+      return false;
+    }
+
+    const targetRect = this.copyRect(this.restoreRect);
+    const sourceRect = this.animator.captureVisualRect();
+    const token = this.beginOperation();
+
+    this.animator.cancel();
+    this.position = Position.CENTER;
+
+    const restoreGeometry = () => {
+      if (token !== this.operationToken) {
+        return;
+      }
+
+      this.animator.prepare(sourceRect, targetRect);
+      this.waitForGeometry(token, () => {
+        const settledRect = this.window.get_frame_rect();
+        this.position = Position.CENTER;
+        this.lastSettledRect = this.copyRect(settledRect);
+        this.restoreRect = this.copyRect(settledRect);
+        this.animator.animate(sourceRect, settledRect);
+      });
+      this.window.move_resize_frame(
+        true,
+        targetRect.x,
+        targetRect.y,
+        targetRect.width,
+        targetRect.height
+      );
+    };
+
+    if (this.window.get_maximize_flags() > 0) {
+      this.window.unmaximize();
+      GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+        restoreGeometry();
+        return GLib.SOURCE_REMOVE;
+      });
+      return true;
+    }
+
+    restoreGeometry();
+    return true;
+  }
+
   minimize() {
     if (!this.window.can_minimize()) {
       return false;

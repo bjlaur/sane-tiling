@@ -56,6 +56,14 @@ export default class TileManager {
     this.getTileForWindow(snapshot.window).applySnapshot(snapshot);
   }
 
+  restoreNormal() {
+    const tile = this.getCurrentTile();
+
+    if (tile) {
+      this.restoreNormalTile(tile);
+    }
+  }
+
   moveUp() {
     const tile = this.getCurrentTile();
     const position = tile?.getPosition();
@@ -176,6 +184,14 @@ export default class TileManager {
     const snapshot = tile.captureSnapshot();
 
     if (tile.minimize()) {
+      this.pushUndo(snapshot);
+    }
+  }
+
+  private restoreNormalTile(tile: Tile) {
+    const snapshot = tile.captureSnapshot();
+
+    if (tile.restoreNormal()) {
       this.pushUndo(snapshot);
     }
   }
