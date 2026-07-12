@@ -174,7 +174,8 @@ export default class Tile {
       return false;
     }
 
-    if (!this.window.allows_move() || !this.window.allows_resize()) {
+    const maximized = this.window.get_maximize_flags() > 0;
+    if (!this.window.allows_move() || (!maximized && !this.window.allows_resize())) {
       return false;
     }
 
@@ -214,7 +215,7 @@ export default class Tile {
       );
     };
 
-    if (this.window.get_maximize_flags() > 0) {
+    if (maximized) {
       this.waitForFullyUnmaximized(
         token,
         restoreGeometry,
@@ -247,8 +248,6 @@ export default class Tile {
     this.beginOperation();
     this.startDebugTrace(`minimize:${this.position}`);
     this.animator.cancel();
-    this.position = Position.CENTER;
-    this.lastSettledRect = null;
     this.debugLog('native minimize request');
     this.window.minimize();
     this.finishDebugTrace();
