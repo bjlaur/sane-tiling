@@ -335,6 +335,17 @@ export default class Tile {
         return;
       }
 
+      const currentRect = this.window.get_frame_rect();
+      if (this.rectNear(currentRect, snapshot.rect, RECT_TOLERANCE)) {
+        this.lastSettledRect = this.copyRect(currentRect);
+        if (snapshot.position === Position.CENTER) {
+          this.restoreRect = this.copyRect(currentRect);
+        }
+        this.debugLog(`undo geometry already settled final=${this.formatRect(currentRect)}`);
+        this.finishDebugTrace();
+        return;
+      }
+
       const sourceRect = this.animator.captureVisualRect();
       this.waitForGeometry(token, () => {
         this.clearWaitState();

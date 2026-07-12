@@ -1,40 +1,17 @@
-import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 
 import Tile, { type WindowSnapshot } from './tile.js';
 
-type MinimizedSequence = {
-    tile: Tile;
-    snapshot: WindowSnapshot;
-};
-
 export default class TileManager {
     private tiles: Map<number, Tile> = new Map();
     private undoStack: WindowSnapshot[] = [];
-    private minimizedSequence: MinimizedSequence | null = null;
     private arrowSequenceTile: Tile | null = null;
-    private stageCapturedEventId = 0;
 
     private settings: Gio.Settings;
 
     constructor(settings: Gio.Settings) {
         this.settings = settings;
-        this.stageCapturedEventId = global.stage.connect(
-            'captured-event',
-            (_actor, event) => {
-                if (event.type() !== Clutter.EventType.KEY_RELEASE) {
-                    return Clutter.EVENT_PROPAGATE;
-                }
-
-                const keySymbol = event.get_key_symbol();
-                if (keySymbol === Clutter.KEY_Super_L || keySymbol === Clutter.KEY_Super_R) {
-                    this.clearArrowSequence();
-                }
-
-                return Clutter.EVENT_PROPAGATE;
-            }
-        );
     }
 
     private createTileForWindow(window: Meta.Window) {
@@ -43,8 +20,8 @@ export default class TileManager {
         this.tiles.set(windowId, tile);
 
         tile.connect('unmanaged', () => {
-            if (this.minimizedSequence?.tile === tile || this.arrowSequenceTile === tile) {
-                this.clearArrowSequence();
+            if (this.arrowSequenceTile === tile) {
+                this.clearArrowSequence('window-unmanaged');
             }
 
             tile.destroy();
@@ -67,7 +44,7 @@ export default class TileManager {
     }
 
     moveRight() {
-        this.abandonPendingMinimize();
+        this.logCommandEntry('right');
 
         const tile = this.getArrowTargetTile();
         const position = tile?.getPosition();
@@ -76,7 +53,9 @@ export default class TileManager {
         }
 
         if (position === Position.LEFT) {
-            this.restoreNormalTile(tile);
+            if (!this.restoreNormalTile(tile)) {
+                this.moveTile(tile, Position.RIGHT);
+            }
             return;
         }
 
@@ -88,7 +67,7 @@ export default class TileManager {
     }
 
     moveLeft() {
-        this.abandonPendingMinimize();
+        this.logCommandEntry('left');
 
         const tile = this.getArrowTargetTile();
         const position = tile?.getPosition();
@@ -97,7 +76,9 @@ export default class TileManager {
         }
 
         if (position === Position.RIGHT) {
-            this.restoreNormalTile(tile);
+            if (!this.restoreNormalTile(tile)) {
+                this.moveTile(tile, Position.LEFT);
+            }
             return;
         }
 
@@ -109,7 +90,7 @@ export default class TileManager {
     }
 
     undo() {
-        this.clearArrowSequence();
+        this.clearArrowSequence('undo');
 
         const snapshot = this.undoStack.pop();
         if (!snapshot) {
@@ -120,7 +101,7 @@ export default class TileManager {
     }
 
     restoreNormal() {
-        this.clearArrowSequence();
+        this.clearArrowSequence('restore-normal-command');
 
         const tile = this.getCurrentTile();
         if (tile) {
@@ -129,10 +110,7 @@ export default class TileManager {
     }
 
     moveUp() {
-        if (this.restoreMinimizedSequence()) {
-            return;
-        }
-
+        this.logCommandEntry('up');
         const tile = this.getArrowTargetTile();
         const position = tile?.getPosition();
         if (!tile || position === undefined) {
@@ -167,7 +145,7 @@ export default class TileManager {
     }
 
     moveDown() {
-        this.abandonPendingMinimize();
+        this.logCommandEntry('down');
 
         const tile = this.getArrowTargetTile();
         const position = tile?.getPosition();
@@ -204,12 +182,7 @@ export default class TileManager {
     }
 
     destroy() {
-        this.clearArrowSequence();
-
-        if (this.stageCapturedEventId) {
-            global.stage.disconnect(this.stageCapturedEventId);
-            this.stageCapturedEventId = 0;
-        }
+        this.clearArrowSequence('destroy');
 
         for (const tile of this.tiles.values()) {
             tile.destroy();
@@ -241,32 +214,18 @@ export default class TileManager {
         const snapshot = tile.captureSnapshot();
         if (tile.minimize()) {
             this.arrowSequenceTile = tile;
-            this.minimizedSequence = { tile, snapshot };
             this.pushUndo(snapshot);
         }
-    }
-
-    private restoreMinimizedSequence() {
-        const sequence = this.minimizedSequence;
-        this.minimizedSequence = null;
-
-        if (!sequence || !sequence.snapshot.window.minimized) {
-            return false;
-        }
-
-        this.arrowSequenceTile = sequence.tile;
-        const minimizedSnapshot = sequence.tile.captureSnapshot();
-        sequence.tile.reloadScreen();
-        sequence.tile.applySnapshot(sequence.snapshot);
-        this.pushUndo(minimizedSnapshot);
-        return true;
     }
 
     private restoreNormalTile(tile: Tile) {
         const snapshot = tile.captureSnapshot();
         if (tile.restoreNormal()) {
             this.pushUndo(snapshot);
+            return true;
         }
+
+        return false;
     }
 
     private getArrowTargetTile() {
@@ -278,19 +237,29 @@ export default class TileManager {
         return this.getCurrentTile();
     }
 
-    private abandonPendingMinimize() {
-        if (!this.minimizedSequence) {
-            return;
-        }
-
-        this.clearArrowSequence();
-    }
-
-    private clearArrowSequence() {
-        this.minimizedSequence = null;
+    private clearArrowSequence(reason: string) {
+        this.debugLog(`clearArrowSequence reason=${reason}`);
         this.arrowSequenceTile = null;
     }
 
+    private logCommandEntry(command: string) {
+        this.debugLog(
+            `command=${command} focus=${this.focusWindowId()} ` +
+            `arrowTarget=${this.arrowSequenceTile ? 'set' : 'none'}`
+        );
+    }
+
+    private debugLog(message: string) {
+        if (!this.settings.get_boolean('debug-logging')) {
+            return;
+        }
+
+        console.log(`Sane Tiling manager debug: ${message}`);
+    }
+
+    private focusWindowId() {
+        return global.display.get_focus_window()?.get_id() ?? 'none';
+    }
 
     private pushUndo(snapshot: WindowSnapshot) {
         this.undoStack.push(snapshot);
