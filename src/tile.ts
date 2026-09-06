@@ -148,9 +148,7 @@ export default class Tile {
       `screen=${this.formatRect(targetScreen)}`
     );
 
-    if (previousPosition === Position.CENTER) {
-      this.restoreRect = this.copyRect(this.window.get_frame_rect());
-    }
+    this.restoreRect = this.getRestoreRectForScreen(targetScreen);
 
     this.screen = this.copyRect(targetScreen);
     this.position = position;
@@ -525,7 +523,7 @@ export default class Tile {
 
     this.waitForGeometry(token, () => {
       this.debugLog('snap geometry settled');
-      this.finishResize(token, position, sourceRect, false, skipAnimation);
+      this.finishResize(token, position, sourceRect, targetRect, false, skipAnimation);
     });
 
     this.animator.freeze();
@@ -559,6 +557,7 @@ export default class Tile {
     token: number,
     position: Position,
     sourceRect: Mtk.Rectangle,
+    targetRect: Mtk.Rectangle,
     corrected: boolean,
     skipAnimation = false
   ) {
@@ -573,11 +572,27 @@ export default class Tile {
     );
     const correctedPosition = this.getAnchoredPosition(position, actualRect);
 
+    if (!corrected && !this.rectNear(actualRect, targetRect, RECT_TOLERANCE)) {
+      this.waitForGeometry(token, () => {
+        this.debugLog('target correction settled');
+        this.finishResize(token, position, sourceRect, targetRect, true, skipAnimation);
+      });
+      this.debugLog(`target correction request target=${this.formatRect(targetRect)}`);
+      this.window.move_resize_frame(
+        true,
+        targetRect.x,
+        targetRect.y,
+        targetRect.width,
+        targetRect.height
+      );
+      return;
+    }
+
     if (!corrected &&
         (correctedPosition.x !== actualRect.x || correctedPosition.y !== actualRect.y)) {
       this.waitForGeometry(token, () => {
         this.debugLog('anchor correction settled');
-        this.finishResize(token, position, sourceRect, true, skipAnimation);
+        this.finishResize(token, position, sourceRect, targetRect, true, skipAnimation);
       });
       this.debugLog(
         `anchor correction request x=${correctedPosition.x} y=${correctedPosition.y}`
@@ -854,6 +869,19 @@ export default class Tile {
 
   private rectsOverlapVertically(a: Mtk.Rectangle, b: Mtk.Rectangle) {
     return a.y < b.y + b.height && b.y < a.y + a.height;
+  }
+
+  private getRestoreRectForScreen(screen: Mtk.Rectangle) {
+    const rect = this.restoreRect ?? this.window.get_frame_rect();
+    const width = Math.min(rect.width, screen.width);
+    const height = Math.min(rect.height, screen.height);
+
+    return new Mtk.Rectangle({
+      x: screen.x + Math.floor((screen.width - width) / 2),
+      y: screen.y + Math.floor((screen.height - height) / 2),
+      width,
+      height
+    });
   }
 
   private getAnchoredPosition(position: Position, rect: Mtk.Rectangle) {
