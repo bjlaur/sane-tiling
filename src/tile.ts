@@ -30,6 +30,8 @@ type DebugTrace = {
   lastTime: number;
 };
 
+type HorizontalDirection = 'left' | 'right';
+
 export type WindowSnapshot = {
   window: Meta.Window;
   position: Position;
@@ -108,6 +110,49 @@ export default class Tile {
       this.restoreRect = this.copyRect(this.window.get_frame_rect());
     }
 
+    this.position = position;
+    this.animator.cancel();
+
+    if (this.window.get_maximize_flags() > 0) {
+      this.debugLog('route=maximized');
+      this.moveFromMaximized(token, position, sourceRect, targetRect);
+      return true;
+    }
+
+    this.debugLog('route=normal');
+    this.moveNormal(token, position, sourceRect, targetRect);
+    return true;
+  }
+
+  moveToAdjacentMonitor(direction: HorizontalDirection, position: Position) {
+    if (!this.canSnap()) {
+      return false;
+    }
+
+    const targetScreen = this.getAdjacentMonitorWorkArea(direction);
+    if (!targetScreen) {
+      return false;
+    }
+
+    const targetRect = this.getTargetRectForScreen(position, targetScreen);
+    if (!targetRect) {
+      return false;
+    }
+
+    const sourceRect = this.animator.captureVisualRect();
+    const previousPosition = this.getPosition();
+    const token = this.beginOperation();
+    this.startDebugTrace(`move-monitor:${direction}:${previousPosition}->${position}`);
+    this.debugLog(
+      `source=${this.formatRect(sourceRect)} target=${this.formatRect(targetRect)} ` +
+      `screen=${this.formatRect(targetScreen)}`
+    );
+
+    if (previousPosition === Position.CENTER) {
+      this.restoreRect = this.copyRect(this.window.get_frame_rect());
+    }
+
+    this.screen = this.copyRect(targetScreen);
     this.position = position;
     this.animator.cancel();
 
@@ -717,45 +762,49 @@ export default class Tile {
   }
 
   private getTargetRect(position: Position) {
-    const leftWidth = Math.max(1, Math.floor(this.screen.width / 2));
-    const rightWidth = Math.max(1, this.screen.width - leftWidth);
-    const topHeight = Math.max(1, Math.floor(this.screen.height / 2));
-    const bottomHeight = Math.max(1, this.screen.height - topHeight);
-    const rightX = this.screen.x + leftWidth;
-    const bottomY = this.screen.y + topHeight;
+    return this.getTargetRectForScreen(position, this.screen);
+  }
+
+  private getTargetRectForScreen(position: Position, screen: Mtk.Rectangle) {
+    const leftWidth = Math.max(1, Math.floor(screen.width / 2));
+    const rightWidth = Math.max(1, screen.width - leftWidth);
+    const topHeight = Math.max(1, Math.floor(screen.height / 2));
+    const bottomHeight = Math.max(1, screen.height - topHeight);
+    const rightX = screen.x + leftWidth;
+    const bottomY = screen.y + topHeight;
 
     switch (position) {
       case Position.LEFT:
         return new Mtk.Rectangle({
-          x: this.screen.x,
-          y: this.screen.y,
+          x: screen.x,
+          y: screen.y,
           width: leftWidth,
-          height: this.screen.height
+          height: screen.height
         });
       case Position.RIGHT:
         return new Mtk.Rectangle({
           x: rightX,
-          y: this.screen.y,
+          y: screen.y,
           width: rightWidth,
-          height: this.screen.height
+          height: screen.height
         });
       case Position.TOP_LEFT:
         return new Mtk.Rectangle({
-          x: this.screen.x,
-          y: this.screen.y,
+          x: screen.x,
+          y: screen.y,
           width: leftWidth,
           height: topHeight
         });
       case Position.TOP_RIGHT:
         return new Mtk.Rectangle({
           x: rightX,
-          y: this.screen.y,
+          y: screen.y,
           width: rightWidth,
           height: topHeight
         });
       case Position.BOTTOM_LEFT:
         return new Mtk.Rectangle({
-          x: this.screen.x,
+          x: screen.x,
           y: bottomY,
           width: leftWidth,
           height: bottomHeight
@@ -770,6 +819,41 @@ export default class Tile {
       default:
         return null;
     }
+  }
+
+  private getAdjacentMonitorWorkArea(direction: HorizontalDirection) {
+    const currentMonitor = this.window.get_monitor();
+    const currentWorkArea = Main.layoutManager.getWorkAreaForMonitor(currentMonitor);
+    let bestWorkArea: Mtk.Rectangle | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let monitorIndex = 0; monitorIndex < global.display.get_n_monitors(); monitorIndex++) {
+      if (monitorIndex === currentMonitor) {
+        continue;
+      }
+
+      const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+      if (!this.rectsOverlapVertically(currentWorkArea, workArea)) {
+        continue;
+      }
+
+      const distance = direction === 'left'
+        ? currentWorkArea.x - (workArea.x + workArea.width)
+        : workArea.x - (currentWorkArea.x + currentWorkArea.width);
+
+      if (distance < 0 || distance >= bestDistance) {
+        continue;
+      }
+
+      bestDistance = distance;
+      bestWorkArea = workArea;
+    }
+
+    return bestWorkArea ? this.copyRect(bestWorkArea) : null;
+  }
+
+  private rectsOverlapVertically(a: Mtk.Rectangle, b: Mtk.Rectangle) {
+    return a.y < b.y + b.height && b.y < a.y + a.height;
   }
 
   private getAnchoredPosition(position: Position, rect: Mtk.Rectangle) {

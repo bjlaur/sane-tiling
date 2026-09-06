@@ -60,6 +60,7 @@ export default class TileManager {
         }
 
         if (position === Position.RIGHT) {
+            this.moveTileToAdjacentMonitor(tile, 'right', Position.LEFT);
             return;
         }
 
@@ -83,6 +84,7 @@ export default class TileManager {
         }
 
         if (position === Position.LEFT) {
+            this.moveTileToAdjacentMonitor(tile, 'left', Position.RIGHT);
             return;
         }
 
@@ -199,6 +201,13 @@ export default class TileManager {
     private moveTile(tile: Tile, position: Position) {
         const snapshot = tile.captureSnapshot();
         if (tile.move(position)) {
+            this.pushUndo(snapshot);
+        }
+    }
+
+    private moveTileToAdjacentMonitor(tile: Tile, direction: 'left' | 'right', position: Position) {
+        const snapshot = tile.captureSnapshot();
+        if (tile.moveToAdjacentMonitor(direction, position)) {
             this.pushUndo(snapshot);
         }
     }
