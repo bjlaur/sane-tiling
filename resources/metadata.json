@@ -4,7 +4,8 @@
   "uuid": "sane-tiling@nullstring.io",
   "shell-version": [
     "49",
-    "50"
+    "50",
+    "51"
   ],
   "version": 7,
   "settings-schema": "org.gnome.shell.extensions.sane-tiling",
